@@ -20,7 +20,7 @@
 // --- 1. ИСПОЛЬЗОВАНИЕ ПЕРЕЧИСЛЕНИЙ (ENUM) И СТРУКТУР (STRUCT) ---
 // Это делает код самодокументируемым и защищает от ошибок.
 
-// Перечисление для маневров робота
+// Перечисление направлений для маневров робота
 enum class Side {
     Left,  // Поворот налево
     Right  // Поворот направо
@@ -49,20 +49,31 @@ struct MotorDriverConfig {
 };
 
 // --- 2. ОБЪЯВЛЕНИЕ КОНСТАНТ И ГЛОБАЛЬНЫХ ПЕРЕМЕННЫХ ---
-const uint8_t NORMAL_SPEED = 200; // Максимальная скорость (0-255)
-const uint16_t OBSTACLE_DISTANCE = 20; // Расстояние до препятствия (см)
+
+// --- БАЗОВЫЕ СКОРОСТИ И КОЭФФИЦИЕНТЫ МОЩНОСТИ ---
+const uint8_t NORMAL_SPEED = 150; // Максимальная скорость (0-255)
+const float SLOW_MODE_POWER = 0.7; // Для движения вблизи препятствий
+// Коэффициенты для маневра уклонения (Tuning parameters)
+const float TURN_INSIDE_POWER = 0.3; // Мощность внутренней стороны при повороте
+const float TURN_OUTSIDE_POWER = 0.7; // Мощность внешней стороны при повороте
+
+// --- РАССТОЯНИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ЗОН ПОВЕДЕНИЯ ---
+const uint16_t DISTANCE_CRITICAL = 20; 
+const uint16_t DISTANCE_SLOW_ZONE = 50;
+const uint16_t DISTANCE_SAFE_ZONE = 100;
+
+// --- ЗАДЕРЖКИ ДЛЯ ВЫПОЛНЕНИЯ МАНЕВРОВ ---
 const uint16_t BACKUP_DELAY = 500; // Задержка при движении назад (мс)
 const uint16_t TURN_DELAY = 500;   // Задержка при повороте (мс)
-// Переменные для хранения и анализа изменения расстояния при движении,
-// на будущее, для более сложного движения
+
+// Переменные для хранения и анализа изменения расстояния при движении
+// и уклонении от препятствия
 uint16_t CURRENT_DISTANCE;
 uint16_t LAST_DISTANCE;
 unsigned long obstacleAvoidanceTimer = 0; // Таймер длительности маневра
 bool isAvoiding = false;                  // Флаг: находимся ли мы сейчас в режиме уклонения?
 Side currentAvoidanceDir;                 // Куда поворачиваем прямо сейчас?
 const unsigned long AVOIDANCE_DURATION = 1000; // Длительность попытки уклонения (мс)
-
-
 
 // Полная конфигурация пинов для левого драйвера (моторы LF и LB)
 const MotorDriverConfig LEFT_DRIVER_CONFIG = {
@@ -108,10 +119,9 @@ int updateSpeed(float factor) {
     // и возвращает целое значение измененной скорости
 
     float rawSpeed = NORMAL_SPEED * factor; // Изменение скрости
-        // Ограничиваем значения строго в диапазоне 0..MAX_SPEED
+        // Ограничиваем значения строго в диапазоне 0..NORMAL_SPEED
         uint8_t finalSpeed = constrain((uint8_t)(rawSpeed + 0.5), 0, NORMAL_SPEED);
         return finalSpeed;
-
 }
 
 void setPairMotorsSpeed(MotorPair pair, uint8_t speed){
@@ -135,7 +145,6 @@ void setPairMotorsSpeed(MotorPair pair, uint8_t speed){
             rightMotors.setSpeedA(speed);
             rightMotors.setSpeedB(speed);
             break;
-
     }
 }
 
@@ -176,7 +185,7 @@ void moveBackward(uint8_t speed) {
 
 void stopAllMotors() {
 
-    // Остановка двигателей
+    // Остановка всех двигателей
 
     leftMotors.stopA();
     leftMotors.stopB();
@@ -225,8 +234,8 @@ void avoidObstacle(Side direction) {
     switch(direction){
         case Side::Left:
             // Левая сторона притормаживает
-            setPairMotorsSpeed(MotorPair::LeftPair, updateSpeed(0.3));
-            setPairMotorsSpeed(MotorPair::RightPair, updateSpeed(0.7));
+            setPairMotorsSpeed(MotorPair::LeftPair, updateSpeed(TURN_INSIDE_POWER));
+            setPairMotorsSpeed(MotorPair::RightPair, updateSpeed(TURN_OUTSIDE_POWER));
             leftMotors.forwardA();
             rightMotors.forwardA();
             leftMotors.backwardB();
@@ -234,8 +243,8 @@ void avoidObstacle(Side direction) {
             break;
         case Side::Right:
             // Правая сторона притормаживает
-            setPairMotorsSpeed(MotorPair::RightPair, updateSpeed(0.3));
-            setPairMotorsSpeed(MotorPair::LeftPair, updateSpeed(0.7));
+            setPairMotorsSpeed(MotorPair::RightPair, updateSpeed(TURN_INSIDE_POWER));
+            setPairMotorsSpeed(MotorPair::LeftPair, updateSpeed(TURN_OUTSIDE_POWER));
             leftMotors.forwardA();
             rightMotors.forwardA();
             leftMotors.backwardB();
@@ -266,83 +275,77 @@ void setup() {
 
 void loop() {
 
-    if (1==0) {
     int distance = getDistance();
 
     if (distance >= 0) { // Проверяем, что датчик вернул валидное значение
-        DEBUG_PRINT("Расстояние: ");
-        DEBUG_PRINT(distance);
-        DEBUG_PRINTLN(" см");
-    }
-
-    if (distance >= 100) { 
-        //Движение вперед на нормальной скорости, если препятствие дальше 100 см)
+            DEBUG_PRINT("Расстояние: ");
+            DEBUG_PRINT(distance);
+            DEBUG_PRINTLN(" см");
+        }
+    if (distance >= DISTANCE_SAFE_ZONE) { 
+        // Движение вперед на нормальной скорости.
+        // Робот в SAFE_ZONE, препятствие дальше 100 см)
         moveForward(NORMAL_SPEED);
         DEBUG_PRINT("Препятствия нет. Движение вперед. Скорость: ");
         DEBUG_PRINTLN(NORMAL_SPEED);
     } 
-    
-    // Если расстояние от 50 до 100 см, снижаем скорость на 30%
-    if (distance >=50 && distance < 100) {
- 
-        moveForward(updateSpeed(0.4));
+
+    // Если расстояние от 50 до 100 см, то есть робот в SLOW_ZONE
+    // снижаем скорость на 30%
+    if (distance >= DISTANCE_SLOW_ZONE && distance < DISTANCE_SAFE_ZONE) {
+
+        moveForward(updateSpeed(SLOW_MODE_POWER));
         DEBUG_PRINT("Обнаружено препятствие. Движение вперед. Скорость снижена. Скорость: ");
-        DEBUG_PRINTLN(updateSpeed(0.4));
+        DEBUG_PRINTLN(updateSpeed(SLOW_MODE_POWER));
     }
-
     // --- МАНЕВР УКЛОНЕНИЯ ---
+    // 1. Если робот НЕ в процессе уклонения,
+    // но увидел препятствие на расстоянии от 20 до 50 см (CRITICAL_ZONE)
+    if (!isAvoiding && distance > DISTANCE_CRITICAL && distance < DISTANCE_SLOW_ZONE) {
 
-    // 1. Если мы НЕ в процессе уклонения, но увидели препятствие близко
-    if (!isAvoiding && distance > 20 && distance < 50) {
-        
         DEBUG_PRINTLN("Начинаем маневр уклонения.");
-        
+
         // Инициализируем параметры маневра
         isAvoiding = true;
         LAST_DISTANCE = distance;
         currentAvoidanceDir = random(0, 2) == 0 ? Side::Left : Side::Right;
-        
+
         // Заводим таймер
         obstacleAvoidanceTimer = millis(); 
-        
-        // Снижаем общую скорость для плавности
-        setupAllMotors(NORMAL_SPEED * 0.6);
-        
+
         // Даем команду начать уклонение
         avoidObstacle(currentAvoidanceDir);
-        
+
         DEBUG_PRINT("Уклонение: ");
         DEBUG_PRINTLN(currentAvoidanceDir == Side::Left ? "НАЛЕВО" : "НАПРАВО");
     }
-
     // 2. Если мы УЖЕ в процессе уклонения
     if (isAvoiding) {
-        
+
         // ОБЯЗАТЕЛЬНО постоянно обновляем данные с датчика!
         CURRENT_DISTANCE = getDistance(); 
-        
+
         // Проверяем, не стало ли хуже (упираемся в угол)
         if (CURRENT_DISTANCE < LAST_DISTANCE) {
             DEBUG_PRINTLN("Препятствие ближе! Меняем направление.");
-            
+
             // Меняем направление поворота
             currentAvoidanceDir = (currentAvoidanceDir == Side::Left) ? Side::Right : Side::Left;
             avoidObstacle(currentAvoidanceDir);
-            
+
             // Обновляем контрольную точку расстояния
             LAST_DISTANCE = CURRENT_DISTANCE; 
-            
+
             // Сбрасываем таймер, даем новой попытке полные 1000 мс
             obstacleAvoidanceTimer = millis(); 
         }
-
         // Проверяем, прошло ли заданное время (ваш старый delay)
         if (millis() - obstacleAvoidanceTimer >= AVOIDANCE_DURATION) {
-            
+
             DEBUG_PRINTLN("Время маневра истекло. Проверяем результат.");
-            
+
             // Время вышло. Выясняем, свободен ли путь теперь?
-            if (getDistance() >= 50) {
+            if (getDistance() >= DISTANCE_SLOW_ZONE) {
                 // Путь чист, выходим из режима уклонения
                 DEBUG_PRINTLN("Путь свободен. Возврат к нормальному движению.");
                 isAvoiding = false;
@@ -354,44 +357,29 @@ void loop() {
             }
         }
     }
-       
-    if (distance <= 20) {
-        // Если расстояние менее 20 см, остановка и поворот в случайную сторону
+    
+    if (distance <= DISTANCE_CRITICAL) {
+        // Если расстояние менее 20 см (STOP_ZONE), 
+        // остановка и поворот в случайную сторону
         stopAllMotors();
         delay(BACKUP_DELAY);
         DEBUG_PRINTLN("Остановка.");
-
-        moveBackward(NORMAL_SPEED*0.7);
+        moveBackward(SLOW_MODE_POWER);
         delay(BACKUP_DELAY);
         DEBUG_PRINTLN("Движение назад.");
-
         stopAllMotors();
         DEBUG_PRINTLN("Остановка.");
         delay(200); // Короткая пауза перед поворотом
-        
+
         // Случайный поворот: 0 - Left, 1 - Right
         Side turnDirection = random(0, 2) == 0 ? Side::Left : Side::Right;
         DEBUG_PRINT("Поворот: ");
         DEBUG_PRINTLN(turnDirection == Side::Left ? "НАЛЕВО" : "НАПРАВО");
         turn(turnDirection);
         delay(TURN_DELAY);
-
         stopAllMotors();
         delay(200);
     }
 
-    }
-
-    if (1==1) {   // Тестовая часть кода для проверки работы моторов и датчиков
-
-        moveForward(150);
-        delay(1000);
-        avoidObstacle(Side::Left);
-        delay(1000);
-        avoidObstacle(Side::Right);
-        delay(1000);
-
-
-    }
 }
 
