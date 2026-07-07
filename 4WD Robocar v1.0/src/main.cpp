@@ -53,14 +53,16 @@ struct MotorDriverConfig {
 // --- БАЗОВЫЕ СКОРОСТИ И КОЭФФИЦИЕНТЫ МОЩНОСТИ ---
 const uint8_t NORMAL_SPEED = 150; // Максимальная скорость (0-255)
 const float SLOW_MODE_POWER = 0.7; // Для движения вблизи препятствий
+const float BACKWARD_MODE_POWER = 0.7; // Мощность движение назад, отъезд от препятствия
+const float TURNING_MODE_POWER = 0.5; // Снижение мощности при повороте на месте, для плавности
 // Коэффициенты для маневра уклонения (Tuning parameters)
 const float TURN_INSIDE_POWER = 0.3; // Мощность внутренней стороны при повороте
 const float TURN_OUTSIDE_POWER = 0.7; // Мощность внешней стороны при повороте
 
 // --- РАССТОЯНИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ЗОН ПОВЕДЕНИЯ ---
-const uint16_t DISTANCE_CRITICAL = 20; 
-const uint16_t DISTANCE_SLOW_ZONE = 50;
-const uint16_t DISTANCE_SAFE_ZONE = 100;
+const int16_t DISTANCE_CRITICAL = 20; 
+const int16_t DISTANCE_SLOW_ZONE = 50;
+const int16_t DISTANCE_SAFE_ZONE = 100;
 
 // --- ЗАДЕРЖКИ ДЛЯ ВЫПОЛНЕНИЯ МАНЕВРОВ ---
 const uint16_t BACKUP_DELAY = 500; // Задержка при движении назад (мс)
@@ -202,7 +204,7 @@ void turn(Side direction) {
     switch(direction) {
         case Side::Left:
             // Логика поворота налево
-            setupAllMotors(NORMAL_SPEED);
+            setupAllMotors(updateSpeed(TURNING_MODE_POWER));
             leftMotors.backwardA(); // Левая сторона назад
             rightMotors.forwardA(); // Правая сторона едет вперед
             leftMotors.forwardB();
@@ -210,7 +212,7 @@ void turn(Side direction) {
             break;
         case Side::Right:
             // Логика поворота направо
-            setupAllMotors(NORMAL_SPEED);
+            setupAllMotors(updateSpeed(TURNING_MODE_POWER));
             leftMotors.forwardA();  // Левая сторона едет вперед
             rightMotors.backwardA(); // Правая сторона движется назад
             leftMotors.backwardB();
@@ -364,7 +366,7 @@ void loop() {
         stopAllMotors();
         delay(BACKUP_DELAY);
         DEBUG_PRINTLN("Остановка.");
-        moveBackward(SLOW_MODE_POWER);
+        moveBackward(updateSpeed(BACKWARD_MODE_POWER));
         delay(BACKUP_DELAY);
         DEBUG_PRINTLN("Движение назад.");
         stopAllMotors();
