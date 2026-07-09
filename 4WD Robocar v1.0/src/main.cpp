@@ -363,6 +363,9 @@ void loop() {
     if (distance <= DISTANCE_CRITICAL) {
         // Если расстояние менее 20 см (STOP_ZONE), 
         // остановка и поворот в случайную сторону
+        
+        isAvoiding = false;    // Проверка, вернется ли в режим уклонения после отката от препятствия?
+        
         stopAllMotors();
         delay(BACKUP_DELAY);
         DEBUG_PRINTLN("Остановка.");
